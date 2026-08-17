@@ -2,6 +2,9 @@
  * DSH Launcher — Electron main process (thin shell).
  * All orchestration lives in local/runner.js (pure Node, testable);
  * this file only owns the window, tray, and IPC glue.
+ *
+ * OFFLINE-ONLY: the offline bundle is embedded in the installer
+ * (process.resourcesPath/bundle); nothing is downloaded over the network.
  */
 
 const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage } = require("electron");
@@ -20,12 +23,9 @@ let tray = null;
 let quitting = false;
 let runner = null;
 
-function loadDefaults() {
-	try {
-		return JSON.parse(fs.readFileSync(path.join(__dirname, "local", "bundle.json"), "utf8"));
-	} catch {
-		return { owner: "", repo: "", defaultMirrors: [] };
-	}
+/** The offline bundle shipped inside the installer (may not exist in dev). */
+function embeddedBundleDir() {
+	return path.join(process.resourcesPath, "bundle");
 }
 
 function log(msg) {
@@ -38,7 +38,6 @@ function log(msg) {
 /* ------------------------------------------------------------------ */
 
 function trayIcon() {
-	// 16x16 solid color dot (no asset file needed)
 	const size = 16;
 	const buf = Buffer.alloc(size * size * 4);
 	for (let i = 0; i < size * size; i++) {
@@ -52,8 +51,8 @@ function trayIcon() {
 
 function createWindow() {
 	win = new BrowserWindow({
-		width: 620,
-		height: 720,
+		width: 640,
+		height: 760,
 		title: "DSH Launcher",
 		show: false,
 		webPreferences: {
@@ -72,7 +71,6 @@ function createWindow() {
 		win.show();
 	});
 	win.on("close", (e) => {
-		// closing the window keeps DSH running in the tray (mac convention)
 		if (!quitting) {
 			e.preventDefault();
 			win.hide();
@@ -86,7 +84,7 @@ function createTray() {
 	const menu = Menu.buildFromTemplate([
 		{
 			label: "打开界面",
-			click: () => (runner?.state.url ? shell.openExternal(runner.state.url) : runner?.start()),
+			click: () => (runner?.state.url ? shell.openExternal(runner.state.url) : win.show()),
 		},
 		{ label: "显示窗口", click: () => win.show() },
 		{ label: "打开工作目录", click: () => shell.openPath(settingsMod.loadSettings(app.getPath("userData")).workspace) },
@@ -102,12 +100,10 @@ function createTray() {
 /* ------------------------------------------------------------------ */
 
 function registerIpc() {
+	ipcMain.handle("prepare", () => runner.prepare());
+	ipcMain.handle("launch", () => runner.launch());
 	ipcMain.handle("start", () => runner.start());
 	ipcMain.handle("stop", () => runner.stop());
-	ipcMain.handle("check-update", async () => {
-		const info = await runner.checkUpdate();
-		return info ? { ok: true } : { ok: false, error: runner.state.error };
-	});
 	ipcMain.handle("use-local-zip", async () => {
 		const res = await dialog.showOpenDialog(win, {
 			title: "选择离线包 zip",
@@ -116,8 +112,9 @@ function registerIpc() {
 		});
 		if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
 		try {
-			const dir = await runner.installLocalZip(res.filePaths[0]);
-			await runner.launchFrom(dir);
+			const dir = await runner.prepare({ zipPath: res.filePaths[0] });
+			if (!dir) return { ok: false, error: runner.state.error };
+			await runner.launch();
 			return { ok: true };
 		} catch (err) {
 			return { ok: false, error: err.message };
@@ -137,28 +134,20 @@ function registerIpc() {
 	});
 	ipcMain.handle("open-workspace", () => shell.openPath(settingsMod.loadSettings(app.getPath("userData")).workspace));
 	ipcMain.handle("open-browser", () => runner.state.url && shell.openExternal(runner.state.url));
-	ipcMain.handle("set-mirror", async (_e, mirrorId) => {
-		const s = settingsMod.loadSettings(app.getPath("userData"));
-		s.mirrorId = mirrorId;
-		settingsMod.saveSettings(app.getPath("userData"), s);
-		return { ok: true };
+	ipcMain.handle("quit", () => {
+		quitting = true;
+		app.quit();
 	});
 	ipcMain.handle("get-state", () => runner.getState());
 	ipcMain.handle("get-settings", () => {
 		const s = settingsMod.loadSettings(app.getPath("userData"));
-		return { workspace: s.workspace, port: s.port, mirrorId: s.mirrorId, customMirrorBase: s.customMirrorBase };
+		return { workspace: s.workspace, port: s.port };
 	});
 	ipcMain.handle("set-port", async (_e, port) => {
 		const n = Number(port);
 		if (!Number.isInteger(n) || n < 1 || n > 65535) return { ok: false, error: "端口必须是 1–65535 的整数" };
 		const s = settingsMod.loadSettings(app.getPath("userData"));
 		s.port = n;
-		settingsMod.saveSettings(app.getPath("userData"), s);
-		return { ok: true };
-	});
-	ipcMain.handle("set-custom-mirror", async (_e, base) => {
-		const s = settingsMod.loadSettings(app.getPath("userData"));
-		s.customMirrorBase = String(base ?? "").trim();
 		settingsMod.saveSettings(app.getPath("userData"), s);
 		return { ok: true };
 	});
@@ -183,7 +172,7 @@ if (!gotLock) {
 		runner = createRunner({
 			userDataDir: app.getPath("userData"),
 			platform: process.platform,
-			defaults: loadDefaults(),
+			embeddedBundleDir: embeddedBundleDir(),
 			log,
 			onState: (s) => {
 				if (win && !win.isDestroyed()) win.webContents.send("state", s);
@@ -193,7 +182,6 @@ if (!gotLock) {
 		registerIpc();
 		createWindow();
 		createTray();
-		if (!SMOKE) runner.start(); // auto-start for non-technical users
 	});
 
 	app.on("before-quit", () => {
@@ -202,6 +190,6 @@ if (!gotLock) {
 	});
 
 	app.on("window-all-closed", () => {
-		// keep running in tray; macOS + Windows alike (DSH must keep serving)
+		// keep running in tray; DSH must keep serving
 	});
 }

@@ -1,23 +1,22 @@
 #!/usr/bin/env node
 /**
- * End-to-end test of the launcher's core flow against a REAL offline bundle:
- *   mirror fetch → download → sha256 verify → extract → spawn dsh web →
- *   wait for URL → stop. Runs headless (no Electron, no browser opening).
+ * End-to-end test of the launcher's OFFLINE flow against a REAL offline bundle:
+ *   embedded bundle → prepare (detect/copy) → launch dsh web → wait URL → stop.
+ * Also covers the local-zip fallback and reuse-without-recoping.
+ * Runs headless (no Electron, no browser opening).
  *
  * Usage:
  *   node tools/test-app-e2e.mjs --bundle-zip offline/dsh-offline-<platform>-<arch>-<ver>.zip
  *
- * The bundle's platform/arch must match the host machine (the test spawns the
- * bundled node runtime for real).
+ * The bundle's platform/arch must match the host machine (we spawn the bundled
+ * node runtime for real).
  */
 
-import { createHash } from "node:crypto";
-import { createServer } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { createRunner } = require("../app/local/runner.js");
@@ -28,66 +27,14 @@ if (!zipArg || !existsSync(zipArg)) {
 	console.error("usage: node tools/test-app-e2e.mjs --bundle-zip <offline-zip>");
 	process.exit(2);
 }
-const zipBuf = readFileSync(zipArg);
-const zipSha256 = createHash("sha256").update(zipBuf).digest("hex");
 const platform = process.platform;
 const arch = process.arch;
 const key = `${platform}-${arch}`;
 
-/* ---- local mirror server ---- */
-let server;
-let baseUrl;
-await new Promise((resolve) => {
-	server = createServer((req, res) => {
-		const url = req.url.split("?")[0];
-		if (url === "/latest.json") {
-			const body = Buffer.from(
-				JSON.stringify({
-					schemaVersion: 1,
-					dshVersion: "e2e-test",
-					nodeVersion: "22.14.0",
-					platforms: { [key]: { url: "bundle.zip", sha256: zipSha256, size: zipBuf.length } },
-				}),
-			);
-			res.writeHead(200, { "content-type": "application/json", "content-length": body.length });
-			res.end(body);
-			return;
-		}
-		if (url === "/bundle.zip") {
-			const range = req.headers.range;
-			if (range) {
-				const m = /bytes=(\d+)-/.exec(range);
-				if (m) {
-					const start = Number(m[1]);
-					const slice = zipBuf.subarray(start);
-					res.writeHead(206, {
-						"content-type": "application/zip",
-						"content-range": `bytes ${start}-${zipBuf.length - 1}/${zipBuf.length}`,
-						"content-length": slice.length,
-						"accept-ranges": "bytes",
-					});
-					res.end(slice);
-					return;
-				}
-				res.writeHead(416);
-				res.end();
-				return;
-			}
-			res.writeHead(200, { "content-type": "application/zip", "content-length": zipBuf.length });
-			res.end(zipBuf);
-			return;
-		}
-		res.writeHead(404);
-		res.end("not found");
-	});
-	server.listen(0, "127.0.0.1", () => {
-		baseUrl = `http://127.0.0.1:${server.address().port}`;
-		resolve();
-	});
-});
-
-/* ---- runner with a local "mirror" ---- */
+/* ---- extract the zip into a fake "embedded bundle" dir ---- */
 const tmp = mkdtempSync(join(tmpdir(), "dsh-e2e-"));
+const embedded = join(tmp, "embedded");
+execFileSync("unzip", ["-q", zipArg, "-d", embedded]);
 const userData = join(tmp, "userData");
 const workspace = join(tmp, "workspace");
 process.env.DSH_HOME = join(tmp, "dsh-home"); // never touch the real ~/.dsh
@@ -96,11 +43,7 @@ const phasesSeen = [];
 const runner = createRunner({
 	userDataDir: userData,
 	platform,
-	defaults: {
-		owner: "x",
-		repo: "y",
-		defaultMirrors: [{ id: "local", label: "本地镜像", latestTemplate: `${baseUrl}/latest.json`, assetPrefix: `${baseUrl}/` }],
-	},
+	embeddedBundleDir: embedded,
 	log: (m) => console.log(`  [log] ${m}`),
 	onState: (s) => {
 		phasesSeen.push(s.phase);
@@ -108,9 +51,8 @@ const runner = createRunner({
 	},
 });
 
-// workspace via settings
 const settingsMod = require("../app/local/settings.js");
-settingsMod.saveSettings(userData, { workspace, port: 3080, mirrorId: "local" });
+settingsMod.saveSettings(userData, { workspace, port: 3080 });
 
 let failures = 0;
 const check = (name, fn) => {
@@ -132,39 +74,24 @@ const checkAsync = async (name, fn) => {
 	}
 };
 
-console.log(`e2e: bundle=${zipArg} (${(zipBuf.length / 1024 / 1024).toFixed(1)} MB) host=${key}`);
+console.log(`e2e(offline): bundle=${zipArg} host=${key}`);
 
-await checkAsync("start(): download → verify → extract → dsh web running", async () => {
-	const result = await runner.start();
-	if (!result) throw new Error(`start returned null: ${runner.state.error}`);
-	if (runner.state.phase !== "running") throw new Error(`phase=${runner.state.phase} error=${runner.state.error}`);
-	if (!runner.state.url) throw new Error("no url");
+await checkAsync("prepare(): detect embedded bundle → copy → ready", async () => {
+	const dir = await runner.prepare();
+	if (!dir) throw new Error(`prepare failed: ${runner.state.error}`);
+	if (runner.state.phase !== "ready") throw new Error(`phase=${runner.state.phase}`);
+	if (!existsSync(join(dir, "manifest.json"))) throw new Error("bundle not copied to userData");
+	const manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
+	if (manifest.platform !== platform) throw new Error(`manifest platform mismatch: ${manifest.platform}`);
+});
+
+await checkAsync("launch(): dsh web running", async () => {
+	const result = await runner.launch();
+	if (!result) throw new Error(`launch failed: ${runner.state.error}`);
+	if (runner.state.phase !== "running") throw new Error(`phase=${runner.state.phase}`);
 	const res = await fetch(runner.state.url);
 	if (res.status >= 500) throw new Error(`dsh web responded ${res.status}`);
-	if (!phasesSeen.includes("downloading")) throw new Error("never entered downloading phase");
-	if (!phasesSeen.includes("verifying")) throw new Error("never entered verifying phase");
-	// bundle extracted?
-	const bundleDir = join(userData, "bundles", `${key}-e2e-test`);
-	if (!existsSync(join(bundleDir, "manifest.json"))) throw new Error("manifest.json missing after extract");
-});
-
-await checkAsync("restart() reuses bundle without re-downloading", async () => {
-	await runner.stop();
-	phasesSeen.length = 0;
-	const result = await runner.start();
-	if (!result) throw new Error(`restart failed: ${runner.state.error}`);
-	if (runner.state.phase !== "running") throw new Error(`phase=${runner.state.phase}`);
-	if (phasesSeen.includes("downloading")) throw new Error("re-downloaded on restart");
-});
-
-await checkAsync("installLocalZip from a copied zip", async () => {
-	await runner.stop();
-	const copy = join(tmp, "copied.zip");
-	writeFileSync(copy, zipBuf);
-	const dir = await runner.installLocalZip(copy);
-	if (!existsSync(join(dir, "manifest.json"))) throw new Error("local zip install failed");
-	await runner.launchFrom(dir);
-	if (runner.state.phase !== "running") throw new Error(`phase=${runner.state.phase} error=${runner.state.error}`);
+	if (!phasesSeen.includes("launching")) throw new Error("never entered launching phase");
 });
 
 await checkAsync("stop() terminates the dsh child", async () => {
@@ -172,12 +99,27 @@ await checkAsync("stop() terminates the dsh child", async () => {
 	if (runner.state.phase !== "stopped") throw new Error("phase not stopped");
 });
 
-check("settings persisted in userData", () => {
-	const s = settingsMod.loadSettings(userData);
-	if (s.workspace !== workspace || s.mirrorId !== "local") throw new Error("settings not persisted");
+await checkAsync("prepare() again reuses the copied bundle (no re-copy)", async () => {
+	const dir = await runner.prepare();
+	if (!dir) throw new Error("prepare failed on second run");
+	if (runner.state.phase !== "ready") throw new Error(`phase=${runner.state.phase}`);
 });
 
-server.close();
+await checkAsync("installLocalZip from a copied zip (fallback)", async () => {
+	const copy = join(tmp, "copied.zip");
+	writeFileSync(copy, readFileSync(zipArg));
+	const dir = await runner.installLocalZip(copy);
+	if (!existsSync(join(dir, "manifest.json"))) throw new Error("local zip install failed");
+	await runner.launchFrom(dir);
+	if (runner.state.phase !== "running") throw new Error(`phase=${runner.state.phase} error=${runner.state.error}`);
+	await runner.stop();
+});
+
+check("settings persisted in userData", () => {
+	const s = settingsMod.loadSettings(userData);
+	if (s.workspace !== workspace) throw new Error("workspace not persisted");
+});
+
 rmSync(tmp, { recursive: true, force: true });
 delete process.env.DSH_HOME;
 
@@ -185,4 +127,4 @@ if (failures) {
 	console.error(`\n${failures} e2e check(s) FAILED`);
 	process.exit(1);
 }
-console.log("\nall e2e checks passed");
+console.log("\nall e2e(offline) checks passed");

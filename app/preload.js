@@ -6,16 +6,16 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("dsh", {
+	prepare: () => ipcRenderer.invoke("prepare"),
+	launch: () => ipcRenderer.invoke("launch"),
 	start: () => ipcRenderer.invoke("start"),
 	stop: () => ipcRenderer.invoke("stop"),
-	checkUpdate: () => ipcRenderer.invoke("check-update"),
 	useLocalZip: () => ipcRenderer.invoke("use-local-zip"),
 	chooseWorkspace: () => ipcRenderer.invoke("choose-workspace"),
 	openWorkspace: () => ipcRenderer.invoke("open-workspace"),
 	openBrowser: () => ipcRenderer.invoke("open-browser"),
-	setMirror: (id) => ipcRenderer.invoke("set-mirror", id),
+	quit: () => ipcRenderer.invoke("quit"),
 	setPort: (p) => ipcRenderer.invoke("set-port", p),
-	setCustomMirror: (base) => ipcRenderer.invoke("set-custom-mirror", base),
 	getState: () => ipcRenderer.invoke("get-state"),
 	getSettings: () => ipcRenderer.invoke("get-settings"),
 	onState: (cb) => ipcRenderer.on("state", (_e, s) => cb(s)),

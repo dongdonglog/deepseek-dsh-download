@@ -9,7 +9,6 @@ config.json                   # 唯一配置源：owner / repo / dshVersion / no
 tools/
   build-offline.mjs           # 构建离线包（纯 Node，无第三方依赖）
   sync-app-config.mjs         # config.json → app/local/bundle.json
-  gen-latest.mjs              # 汇总各平台 zip 生成 latest.json
   smoke.mjs                   # 离线包冒烟测试（dump-config + 原生依赖加载）
   zipwriter.mjs               # 纯 Node zip 写入器（保留可执行位、UTF-8 文件名）
   test-app-local.mjs          # 应用纯 Node 模块的本地测试
@@ -21,7 +20,7 @@ app/                          # Electron 桌面应用（DSH Launcher）
   renderer/                   # 中文单页 UI
   local/                      # 纯 Node 模块：settings / downloader / launcher / runner
 .github/workflows/
-  release.yml                # 推 tag 自动发布：离线包矩阵 + 安装包 + latest.json + 转正
+  release.yml                # 推 tag 自动发布：离线包矩阵 + 安装包（内嵌离线包）+ 转正
   release.mjs                # （tools/）本地发布引导脚本，npm run release
 offline/                      # 本地构建产物输出（gitignore）
 ```
@@ -36,6 +35,8 @@ dsh-offline-<platform>-<arch>-<dshVersion>.zip
 │   └── node_modules/                # 与 npx 安装同构，已删去其他平台原生包
 └── manifest.json                    # 版本与校验信息
 ```
+
+**分发模型（纯离线）**：离线包由 CI **内嵌进安装包**（`app/bundle` → electron-builder `extraResources` → 应用 Resources/bundle），用户装完即用，无任何联网下载。应用首启时把内置离线包复制到用户目录（`<userData>/bundles/`）后启动；也保留「选择本地离线包 zip」作为兜底。
 
 启动命令与 `npx @deepseek-ai/dsh web` 逐字等价：
 `<bundle>/node/node <bundle>/app/node_modules/@deepseek-ai/dsh/lib/bin.js --profile web --port <N>`
@@ -64,9 +65,12 @@ node tools/test-app-e2e.mjs --bundle-zip offline/dsh-offline-darwin-arm64-0.1.0-
 # 运行桌面应用（开发模式）
 cd app && npm install && npm start
 
-# 打包安装包
-cd app && npm run dist:mac   # dmg（arm64 + x64）
-cd app && npm run dist:win   # NSIS exe（x64）
+# 打包安装包（离线包需先放到 app/bundle）
+# 先把对应平台的离线包解压到 app/bundle（CI 自动做，本地手动打包才需要）：
+rm -rf app/bundle && mkdir -p app/bundle
+unzip -q offline/dsh-offline-darwin-arm64-0.1.0-rc.6.zip -d app/bundle
+cd app
+npx electron-builder --mac dmg --arm64   # 或 --x64；Windows: --win nsis zip --x64
 ```
 
 构建工具参数：`--platform darwin|win32`、`--arch arm64|x64`、`--dsh-version`、`--node-version`、`--registry <npm镜像>`（如 `https://registry.npmmirror.com`）。
@@ -80,7 +84,7 @@ cd app && npm run dist:win   # NSIS exe（x64）
 1. `create-release`：先建 draft Release（自动生成 release notes）
 2. `offline`（矩阵并行）：darwin-arm64 (macos-14) / darwin-x64 (macos-15-intel) / win32-x64 → 构建离线包 + 冒烟测试 → 上传 zip 到 Release
 3. `app`（矩阵并行）：macOS dmg（arm64+x64）/ Windows exe+zip → 上传到 Release
-4. `publish`：生成并提交 `latest.json` → 把 draft 转正发布
+4. `publish`：全部构建成功后把 draft 转正发布
 
 ### 发布方式
 
@@ -96,7 +100,7 @@ git push origin v1.1.0
 前置条件（一次性）：
 
 - `config.json` 填好 `owner` / `repo`，确认 `dshVersion` / `nodeVersion`。
-- 仓库 Settings → Actions → General → 勾选 **Workflow permissions: Read and write**（publish job 需要写 `latest.json` 和建 Release）。
+- 仓库 Settings → Actions → General → 勾选 **Workflow permissions: Read and write**（release job 需要建 Release）。
 - 本机装有 [gh CLI](https://cli.github.com/) 并 `gh auth login`（方式一需要）。
 
 **DSH 版本升级**：改 `config.json` 的 `dshVersion`，再发一个新 tag 即可；用户下次启动应用自动发现新离线包（无需重装应用）。
@@ -106,4 +110,4 @@ git push origin v1.1.0
 - 首版平台：macOS arm64 / x64 + Windows x64（win32-arm64 未打包）。
 - 应用安装包**未做代码签名**（macOS Gatekeeper、Windows SmartScreen 需用户手动放行）。
 - 应用自身无自动更新（依赖签名）；离线包版本可自动更新。
-- 离线包**不提交进 git**（体积大），托管于本仓库 GitHub Releases；`latest.json` 提交到 main。
+- 离线包**不提交进 git**（体积大），托管于本仓库 GitHub Releases，并由 CI 内嵌进安装包。

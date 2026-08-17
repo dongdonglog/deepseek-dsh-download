@@ -1,7 +1,8 @@
 name: release
 
 # 懒人发布：只需 `git tag v1.0.0 && git push origin v1.0.0`
-# 自动完成：建 draft release → 构建全部离线包 + 安装包 → 生成 latest.json → 转正发布
+# 自动完成：建 draft release → 构建各平台离线包 + 把离线包打进安装包 → 转正发布
+# 说明：纯离线安装分发——离线包内置在安装包内，用户装完即用，无任何联网下载。
 on:
   push:
     tags:
@@ -84,15 +85,23 @@ jobs:
           if-no-files-found: error
 
   app:
-    name: app ${{ matrix.os }}
-    needs: create-release
+    name: app ${{ matrix.arch }} (${{ matrix.os }})
+    needs: [create-release, offline]
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: mac
-            runner: macos-latest
+            arch: arm64
+            bundle: darwin-arm64
+            runner: macos-14
+          - os: mac
+            arch: x64
+            bundle: darwin-x64
+            runner: macos-15-intel
           - os: win
+            arch: x64
+            bundle: win32-x64
             runner: windows-latest
     runs-on: ${{ matrix.runner }}
     steps:
@@ -114,14 +123,32 @@ jobs:
         shell: bash
         run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --no-commit-hooks --allow-same-version
 
-      - name: build mac installers
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle-${{ matrix.bundle }}
+          path: bundle-artifact
+
+      - name: extract offline bundle into app/bundle (unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p app/bundle
+          unzip -q bundle-artifact/dsh-offline-${{ matrix.bundle }}-*.zip -d app/bundle
+
+      - name: extract offline bundle into app/bundle (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force app/bundle | Out-Null
+          Expand-Archive -Path (Get-ChildItem bundle-artifact/dsh-offline-${{ matrix.bundle }}-*.zip | Select-Object -First 1).FullName -DestinationPath app/bundle -Force
+
+      - name: build mac installer
         if: matrix.os == 'mac'
         working-directory: app
-        run: npx electron-builder --mac dmg --arm64 --x64 --publish never
+        run: npx electron-builder --mac dmg --${{ matrix.arch }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      - name: build win installers
+      - name: build win installer
         if: matrix.os == 'win'
         working-directory: app
         shell: pwsh
@@ -129,6 +156,7 @@ jobs:
 
       - name: upload installers to release (mac)
         if: matrix.os == 'mac'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" app/dist/*.dmg --clobber --repo "$GITHUB_REPOSITORY"
@@ -145,38 +173,7 @@ jobs:
     needs: [offline, app]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: read versions from config.json
-        id: cfg
-        run: node tools/ci-versions.mjs
-
-      - name: generate latest.json
-        run: node tools/gen-latest.mjs --dsh-version ${{ steps.cfg.outputs.dsh }} --node-version ${{ steps.cfg.outputs.node }} --tag ${{ github.ref_name }} --assets-dir artifacts
-
-      - name: commit latest.json back to main
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add latest.json
-          git diff --cached --quiet || git commit -m "chore: update latest.json for ${{ github.ref_name }}"
-          git push
-
-      - name: upload latest.json to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "$GITHUB_REF_NAME" latest.json --clobber --repo "$GITHUB_REPOSITORY"
-
-      - name: publish draft release
+      - name: Publish draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

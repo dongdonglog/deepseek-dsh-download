@@ -20,63 +20,96 @@
 		</svg>
 		<div class="titles">
 			<h1>DSH Launcher</h1>
-			<p class="sub">DeepSeek Harness 离线引导 · 无需安装 Node / npm</p>
+			<p class="sub">DeepSeek Harness 离线安装器 · 无需联网 · 无需 Node</p>
 		</div>
 	</header>
 
+	<!-- 步骤指示器 -->
+	<nav class="steps" id="steps">
+		<div class="step" data-step="1"><span class="dot">1</span><span class="label">欢迎</span></div>
+		<div class="step" data-step="2"><span class="dot">2</span><span class="label">安装离线包</span></div>
+		<div class="step" data-step="3"><span class="dot">3</span><span class="label">启动</span></div>
+		<div class="step" data-step="4"><span class="dot">4</span><span class="label">完成</span></div>
+	</nav>
+
 	<main>
-		<section class="card status-card">
-			<div class="status-line">
-				<span id="phase" class="phase">准备中</span>
-				<span id="bundle-version" class="version"></span>
-			</div>
-			<div id="detail" class="detail"></div>
-			<div class="bar"><div id="progress" class="bar-fill"></div></div>
-			<div id="error" class="error" hidden></div>
-		</section>
+		<!-- 第 1 步：欢迎 -->
+		<section class="pane" id="pane-1">
+			<h2>欢迎使用 DeepSeek Harness</h2>
+			<p class="intro">
+				本安装器把 DSH（DeepSeek Harness 网页版）离线打包好了：<br />
+				不需要安装 Node、不需要联网，跟着向导点几步就装好。
+			</p>
+			<ul class="feature-list">
+				<li>✔ 完全离线安装（离线包已内置在安装包里）</li>
+				<li>✔ 一键启动浏览器界面（与 <code>npx @deepseek-ai/dsh web</code> 完全一致）</li>
+				<li>✔ 自带 Node 运行时，什么都不用装</li>
+			</ul>
 
-		<section class="card actions">
-			<button id="btn-start" class="primary">启动</button>
-			<button id="btn-stop">停止</button>
-			<button id="btn-check">检查更新</button>
-			<button id="btn-local">使用本地离线包…</button>
-			<button id="btn-open">在浏览器打开</button>
-			<button id="btn-workspace">打开工作目录</button>
-		</section>
-
-		<section class="card settings">
-			<h2>设置</h2>
-			<div class="row">
-				<label for="mirror">下载镜像</label>
-				<select id="mirror">
-					<option value="auto">自动（失败自动切换）</option>
-					<option value="github">GitHub 直连</option>
-					<option value="ghproxy">GitHub 加速 (ghproxy)</option>
-					<option value="custom">自定义镜像</option>
-				</select>
-			</div>
-			<div class="row" id="custom-row" hidden>
-				<label for="custom-mirror">自定义镜像前缀</label>
-				<input id="custom-mirror" type="text" placeholder="https://你的镜像/（需自行托管 latest.json 与 zip）" />
-			</div>
-			<div class="row">
-				<label for="port">起始端口</label>
-				<input id="port" type="number" min="1" max="65535" value="3080" />
-			</div>
-			<div class="row">
-				<label for="workspace">工作目录</label>
-				<div class="workspace-line">
-					<span id="workspace" class="mono"></span>
-					<button id="btn-choose-workspace" class="small">选择…</button>
+			<details class="advanced">
+				<summary>高级设置</summary>
+				<div class="row">
+					<label for="workspace">工作目录</label>
+					<div class="workspace-line">
+						<span id="workspace" class="mono"></span>
+						<button id="btn-choose-workspace" class="small">选择…</button>
+					</div>
 				</div>
+				<div class="row">
+					<label for="port">起始端口</label>
+					<input id="port" type="number" min="1" max="65535" value="3080" />
+				</div>
+			</details>
+		</section>
+
+		<!-- 第 2 步：安装离线包 -->
+		<section class="pane" id="pane-2" hidden>
+			<h2>安装离线包</h2>
+			<p class="intro">正在准备内置的离线包，全程不需要联网。</p>
+			<div class="bar"><div id="progress" class="bar-fill"></div></div>
+			<div id="detail" class="detail"></div>
+			<div class="hint">
+				已有离线包？也可以点「选择本地离线包…」直接指定 U 盘 / 网盘里的
+				<code>dsh-offline-*.zip</code>。
+				<button id="btn-local" class="small">选择本地离线包…</button>
 			</div>
 		</section>
 
-		<section class="card log-card">
-			<h2>日志</h2>
-			<pre id="log" class="log"></pre>
+		<!-- 第 3 步：启动 -->
+		<section class="pane" id="pane-3" hidden>
+			<h2>启动 DSH</h2>
+			<p class="intro">正在启动本地服务并打开浏览器界面…</p>
+			<div class="bar"><div id="progress-launch" class="bar-fill"></div></div>
+			<div id="detail-launch" class="detail"></div>
 		</section>
+
+		<!-- 第 4 步：完成 -->
+		<section class="pane" id="pane-4" hidden>
+			<h2>🎉 安装完成</h2>
+			<p class="intro">DeepSeek Harness 已启动，浏览器应该已经打开了：</p>
+			<div class="url-box" id="url-box"></div>
+			<div class="done-actions">
+				<button id="btn-open" class="primary">在浏览器打开</button>
+				<button id="btn-workspace">打开工作目录</button>
+				<button id="btn-quit">退出</button>
+			</div>
+			<p class="note">关闭本窗口后服务继续在后台运行（托盘菜单可随时打开/退出）。</p>
+		</section>
+
+		<!-- 错误提示（显示在当前步骤内） -->
+		<div id="error" class="error" hidden></div>
 	</main>
+
+	<footer>
+		<button id="btn-back" class="ghost" disabled>上一步</button>
+		<div class="spacer"></div>
+		<button id="btn-next" class="primary" disabled>下一步</button>
+	</footer>
+
+	<details class="log-card">
+		<summary>日志</summary>
+		<pre id="log" class="log"></pre>
+	</details>
 
 	<script src="renderer.js"></script>
 </body>

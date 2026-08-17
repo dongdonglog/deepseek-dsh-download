@@ -1,7 +1,11 @@
 /**
- * Orchestration: bundle acquisition → launch (pure Node, no Electron imports).
- * This is the exact flow the launcher runs; main.js is a thin Electron shell
- * around it, and tests can drive it headlessly.
+ * Orchestration: offline bundle preparation → launch (pure Node, no Electron
+ * imports). This is the exact flow the launcher runs; main.js is a thin
+ * Electron shell around it, and tests can drive it headlessly.
+ *
+ * OFFLINE-ONLY: the offline bundle ships inside the installer (embedded at
+ * process.resourcesPath/bundle) or is provided by the user as a local zip.
+ * Nothing is downloaded over the network.
  *
  * Behavior contract: we spawn exactly what `npx @deepseek-ai/dsh web` would
  * run, with the workspace dir as cwd and DSH_HOME untouched (~/.dsh), so the
@@ -13,7 +17,6 @@ const os = require("node:os");
 const path = require("node:path");
 const extractZip = require("extract-zip");
 
-const downloader = require("./downloader.js");
 const launcher = require("./launcher.js");
 const settingsMod = require("./settings.js");
 
@@ -37,15 +40,15 @@ function chmodNode(bundleDir, platform) {
 
 /**
  * @param {object} deps
- * @param {string} deps.userDataDir  — where settings.json + bundles live
- * @param {string} deps.platform     — process.platform of the target machine
- * @param {object} deps.defaults     — { owner, repo, defaultMirrors } from local/bundle.json
+ * @param {string} deps.userDataDir       — where settings.json + bundles live
+ * @param {string} deps.platform          — process.platform of the target machine
+ * @param {string|null} deps.embeddedBundleDir — offline bundle shipped inside the app, or null
  * @param {(msg: string) => void} deps.log
  * @param {(state: object) => void} deps.onState
  */
-function createRunner({ userDataDir, platform, defaults, log = () => {}, onState = () => {} }) {
+function createRunner({ userDataDir, platform, embeddedBundleDir = null, log = () => {}, onState = () => {} }) {
 	const state = {
-		phase: "idle",
+		phase: "idle", // idle | preparing | ready | launching | running | stopped | error
 		detail: "",
 		progress: 0,
 		error: null,
@@ -63,94 +66,10 @@ function createRunner({ userDataDir, platform, defaults, log = () => {}, onState
 
 	const settings = () => settingsMod.loadSettings(userDataDir);
 
-	async function fetchLatestViaMirrors(mirrors) {
-		let lastErr = null;
-		for (const m of mirrors) {
-			try {
-				log(`检查更新：${m.label}`);
-				const latest = await downloader.fetchJson(m.latestUrl, { timeoutMs: 12000, retries: 1 });
-				if (!latest?.platforms) throw new Error("latest.json 缺少 platforms 字段");
-				return { latest, mirror: m };
-			} catch (err) {
-				lastErr = err;
-				log(`  ${m.label} 不可用：${err.message}`);
-			}
-		}
-		throw new Error(`所有镜像都无法获取版本清单：${lastErr?.message ?? ""}`);
-	}
-
-	async function ensureBundle({ checkOnly = false } = {}) {
-		const s = settings();
-		const mirrors = downloader.buildMirrorList(defaults.defaultMirrors, {
-			owner: defaults.owner,
-			repo: defaults.repo,
-			customMirrorBase: s.customMirrorBase,
-			mirrorId: s.mirrorId,
-		});
-
-		setState({ phase: "checking", detail: "检查最新版本…", error: null });
-		const { latest, mirror } = await fetchLatestViaMirrors(mirrors);
-		const bundle = downloader.pickBundle(latest, platform, process.arch);
-		const targetDir = path.join(s.bundleRoot, `${bundle.key}-${latest.dshVersion}`);
-		const zipPath = path.join(s.bundleRoot, `${bundle.key}-${latest.dshVersion}.zip`);
-		const dshVersion = latest.dshVersion;
-		const nodeVersion = latest.nodeVersion ?? "?";
-
-		const existing = manifestOf(targetDir);
-		if (existing && existing.dshVersion === dshVersion) {
-			log(`离线包已就绪：dsh@${dshVersion}`);
-			activeBundleDir = targetDir;
-			chmodNode(targetDir, platform);
-			return { bundleDir: targetDir, dshVersion, nodeVersion, mirror };
-		}
-
-		if (checkOnly) {
-			return { available: true, dshVersion, nodeVersion, mirror };
-		}
-
-		const dl = await downloader.downloadResumable(mirror.assetPrefix + bundle.url, zipPath, {
-			onProgress: (received, total, resumed) => {
-				const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 0;
-				setState({
-					phase: "downloading",
-					detail: `下载离线包 ${dshVersion}（${mirror.label}）${resumed ? "（断点续传）" : ""}`,
-					progress: pct,
-				});
-			},
-			timeoutMs: 120000,
-		});
-		setState({ phase: "verifying", detail: "校验文件完整性…", progress: 100 });
-		if (dl.sha256.toLowerCase() !== bundle.sha256.toLowerCase()) {
-			fs.rmSync(zipPath, { force: true });
-			throw new Error(
-				`校验失败：sha256 不匹配（期望 ${bundle.sha256}，实际 ${dl.sha256}）。已删除损坏文件，请重试。`,
-			);
-		}
-		log(`sha256 校验通过（${dl.sha256.slice(0, 16)}…）`);
-
-		setState({ phase: "installing", detail: "解压离线包…", progress: 0 });
-		const tmpDir = path.join(s.bundleRoot, `.tmp-${bundle.key}-${Date.now()}`);
-		fs.mkdirSync(tmpDir, { recursive: true });
-		try {
-			await extractZip(zipPath, { dir: tmpDir });
-			if (!manifestOf(tmpDir)) throw new Error("解压后缺少 manifest.json，离线包不完整");
-			fs.mkdirSync(path.dirname(targetDir), { recursive: true });
-			fs.rmSync(targetDir, { recursive: true, force: true });
-			fs.renameSync(tmpDir, targetDir);
-		} finally {
-			fs.rmSync(tmpDir, { recursive: true, force: true });
-		}
-
-		activeBundleDir = targetDir;
-		chmodNode(targetDir, platform);
-		setState({ phase: "installing", detail: "离线包就绪", progress: 100 });
-		log(`离线包解压完成：${targetDir}`);
-		return { bundleDir: targetDir, dshVersion, nodeVersion, mirror };
-	}
-
+	/** Prepare a user-picked local zip (U盘/网盘 offline distribution). */
 	async function installLocalZip(zipPath) {
 		const s = settings();
-		setState({ phase: "installing", detail: "解压本地离线包…", progress: 0, error: null });
+		setState({ phase: "preparing", detail: "校验本地离线包…", progress: 0, error: null });
 		const tmpDir = path.join(s.bundleRoot, `.tmp-local-${Date.now()}`);
 		fs.mkdirSync(tmpDir, { recursive: true });
 		try {
@@ -168,11 +87,78 @@ function createRunner({ userDataDir, platform, defaults, log = () => {}, onState
 			fs.renameSync(tmpDir, targetDir);
 			activeBundleDir = targetDir;
 			chmodNode(targetDir, platform);
-			setState({ phase: "installing", detail: "本地离线包就绪", progress: 100 });
+			setState({
+				phase: "ready",
+				detail: `离线包已就绪：dsh@${manifest.dshVersion}`,
+				progress: 100,
+				bundleVersion: manifest.dshVersion,
+			});
 			log(`本地离线包已安装：${targetDir}`);
 			return targetDir;
 		} finally {
 			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
+	}
+
+	/**
+	 * Prepare the offline bundle for launch: use the embedded bundle from the
+	 * installer (copying it into userData once), or a user-picked local zip.
+	 * No network is ever involved.
+	 */
+	async function prepare({ zipPath = null } = {}) {
+		try {
+			if (state.phase === "preparing" || state.phase === "ready") return activeBundleDir ?? null;
+			setState({ phase: "preparing", detail: "检测离线包…", progress: 0, error: null });
+
+			if (zipPath) {
+				return await installLocalZip(zipPath);
+			}
+
+			const s = settings();
+			if (!embeddedBundleDir) {
+				throw new Error("没有找到离线包。请重新安装最新版应用，或使用「选择本地离线包」");
+			}
+			const manifest = manifestOf(embeddedBundleDir);
+			if (!manifest) throw new Error("内置离线包不完整（缺少 manifest.json）");
+			if (manifest.platform !== platform || manifest.arch !== process.arch) {
+				throw new Error(
+					`内置离线包平台不匹配：${manifest.platform}-${manifest.arch}（当前机器 ${platform}-${process.arch}）。请下载对应平台的安装包。`,
+				);
+			}
+
+			const targetDir = path.join(s.bundleRoot, `${manifest.platform}-${manifest.arch}-${manifest.dshVersion}`);
+			const existing = manifestOf(targetDir);
+			if (existing && existing.dshVersion === manifest.dshVersion && existing.nodeVersion === manifest.nodeVersion) {
+				log(`离线包已就绪：dsh@${manifest.dshVersion}`);
+				activeBundleDir = targetDir;
+				chmodNode(targetDir, platform);
+				setState({
+					phase: "ready",
+					detail: `离线包已就绪：dsh@${manifest.dshVersion}`,
+					progress: 100,
+					bundleVersion: manifest.dshVersion,
+				});
+				return targetDir;
+			}
+
+			// first use of this version: copy the embedded bundle into userData
+			setState({ phase: "preparing", detail: "安装离线包（解压内置包）…", progress: 0 });
+			fs.mkdirSync(path.dirname(targetDir), { recursive: true });
+			fs.rmSync(targetDir, { recursive: true, force: true });
+			fs.cpSync(embeddedBundleDir, targetDir, { recursive: true });
+			activeBundleDir = targetDir;
+			chmodNode(targetDir, platform);
+			setState({
+				phase: "ready",
+				detail: `离线包已就绪：dsh@${manifest.dshVersion}`,
+				progress: 100,
+				bundleVersion: manifest.dshVersion,
+			});
+			log(`离线包安装完成：${targetDir}`);
+			return targetDir;
+		} catch (err) {
+			setState({ phase: "error", error: err.message, progress: 0 });
+			return null;
 		}
 	}
 
@@ -187,7 +173,6 @@ function createRunner({ userDataDir, platform, defaults, log = () => {}, onState
 		setState({ phase: "launching", detail: `启动 DSH 服务（端口 ${port}）…`, url, error: null });
 
 		userStopped = false;
-		let exitInfo = null;
 		let resolveExit;
 		const childExited = new Promise((res) => {
 			resolveExit = res;
@@ -203,7 +188,6 @@ function createRunner({ userDataDir, platform, defaults, log = () => {}, onState
 			},
 			onExit: (info) => {
 				child = null;
-				exitInfo = info;
 				resolveExit(info);
 				if (userStopped) return;
 				const snippet = (info.tail || []).slice(-12).join("").trim();
@@ -236,28 +220,30 @@ function createRunner({ userDataDir, platform, defaults, log = () => {}, onState
 		return { url, port };
 	}
 
-	async function start() {
+	/** Launch using the already-prepared bundle. */
+	async function launch() {
 		try {
-			if (state.phase === "running" || state.phase === "launching") return;
-			const { bundleDir, dshVersion } = await ensureBundle();
-			setState({ bundleVersion: dshVersion });
-			return await launchFrom(bundleDir);
+			if (!activeBundleDir) {
+				const dir = await prepare();
+				if (!dir) return null;
+			}
+			if (state.phase === "running" || state.phase === "launching") return state;
+			return await launchFrom(activeBundleDir);
 		} catch (err) {
 			if (!userStopped) setState({ phase: "error", error: err.message, progress: 0 });
 			return null;
 		}
 	}
 
-	async function checkUpdate() {
-		const prev = { ...state };
+	/** Full offline flow: prepare (embedded/local zip) then launch. */
+	async function start() {
 		try {
-			const info = await ensureBundle({ checkOnly: true });
-			log(`最新版本：dsh@${info.dshVersion}（node@${info.nodeVersion}，来源：${info.mirror.label}）`);
-			log(info.bundleDir ? "已安装此版本，无需下载" : "有新版本可下载，点击「启动」即可下载安装");
-			setState({ ...prev, bundleVersion: info.dshVersion });
-			return info;
+			if (state.phase === "running" || state.phase === "launching") return state;
+			const dir = await prepare();
+			if (!dir) return null;
+			return await launchFrom(dir);
 		} catch (err) {
-			setState({ ...prev, error: err.message });
+			if (!userStopped) setState({ phase: "error", error: err.message, progress: 0 });
 			return null;
 		}
 	}
@@ -284,12 +270,12 @@ function createRunner({ userDataDir, platform, defaults, log = () => {}, onState
 		state,
 		getState: () => ({ ...state }),
 		start,
+		prepare,
+		launch,
 		stop,
 		stopAll,
-		checkUpdate,
 		installLocalZip,
 		launchFrom,
-		ensureBundle,
 	};
 }
 
