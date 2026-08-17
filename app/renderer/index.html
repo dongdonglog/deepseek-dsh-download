@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8" />
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+	<title>DSH Launcher</title>
+	<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+	<header>
+		<svg class="logo" viewBox="0 0 48 48" width="44" height="44" aria-hidden="true">
+			<defs>
+				<linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+					<stop offset="0" stop-color="#4d82f6" />
+					<stop offset="1" stop-color="#2bb3a3" />
+				</linearGradient>
+			</defs>
+			<rect x="2" y="2" width="44" height="44" rx="10" fill="url(#g)" />
+			<text x="24" y="32" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="700" fill="#fff">D</text>
+		</svg>
+		<div class="titles">
+			<h1>DSH Launcher</h1>
+			<p class="sub">DeepSeek Harness 离线引导 · 无需安装 Node / npm</p>
+		</div>
+	</header>
+
+	<main>
+		<section class="card status-card">
+			<div class="status-line">
+				<span id="phase" class="phase">准备中</span>
+				<span id="bundle-version" class="version"></span>
+			</div>
+			<div id="detail" class="detail"></div>
+			<div class="bar"><div id="progress" class="bar-fill"></div></div>
+			<div id="error" class="error" hidden></div>
+		</section>
+
+		<section class="card actions">
+			<button id="btn-start" class="primary">启动</button>
+			<button id="btn-stop">停止</button>
+			<button id="btn-check">检查更新</button>
+			<button id="btn-local">使用本地离线包…</button>
+			<button id="btn-open">在浏览器打开</button>
+			<button id="btn-workspace">打开工作目录</button>
+		</section>
+
+		<section class="card settings">
+			<h2>设置</h2>
+			<div class="row">
+				<label for="mirror">下载镜像</label>
+				<select id="mirror">
+					<option value="auto">自动（失败自动切换）</option>
+					<option value="github">GitHub 直连</option>
+					<option value="ghproxy">GitHub 加速 (ghproxy)</option>
+					<option value="custom">自定义镜像</option>
+				</select>
+			</div>
+			<div class="row" id="custom-row" hidden>
+				<label for="custom-mirror">自定义镜像前缀</label>
+				<input id="custom-mirror" type="text" placeholder="https://你的镜像/（需自行托管 latest.json 与 zip）" />
+			</div>
+			<div class="row">
+				<label for="port">起始端口</label>
+				<input id="port" type="number" min="1" max="65535" value="3080" />
+			</div>
+			<div class="row">
+				<label for="workspace">工作目录</label>
+				<div class="workspace-line">
+					<span id="workspace" class="mono"></span>
+					<button id="btn-choose-workspace" class="small">选择…</button>
+				</div>
+			</div>
+		</section>
+
+		<section class="card log-card">
+			<h2>日志</h2>
+			<pre id="log" class="log"></pre>
+		</section>
+	</main>
+
+	<script src="renderer.js"></script>
+</body>
+</html>

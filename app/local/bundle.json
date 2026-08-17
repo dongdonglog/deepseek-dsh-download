@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "owner": "YOUR_GITHUB_USER",
+  "repo": "dsh-download",
+  "defaultMirrors": [
+    {
+      "id": "github",
+      "label": "GitHub 直连",
+      "latestTemplate": "https://raw.githubusercontent.com/{owner}/{repo}/main/latest.json",
+      "assetPrefix": ""
+    },
+    {
+      "id": "ghproxy",
+      "label": "GitHub 加速 (ghproxy)",
+      "latestTemplate": "https://ghproxy.com/https://raw.githubusercontent.com/{owner}/{repo}/main/latest.json",
+      "assetPrefix": "https://ghproxy.com/"
+    }
+  ]
+}

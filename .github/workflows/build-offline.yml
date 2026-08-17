@@ -1,0 +1,109 @@
+name: build-offline
+
+on:
+  workflow_dispatch:
+    inputs:
+      dshVersion:
+        description: "@deepseek-ai/dsh 版本（如 0.1.0-rc.6）"
+        required: true
+        default: "0.1.0-rc.6"
+      nodeVersion:
+        description: "捆绑的 Node 运行时版本（如 22.14.0）"
+        required: true
+        default: "22.14.0"
+      tag:
+        description: "GitHub Release 标签（如 v1.0.0）"
+        required: true
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: bundle ${{ matrix.platform }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin
+            arch: arm64
+            runner: macos-14
+          - platform: darwin
+            arch: x64
+            runner: macos-13
+          - platform: win32
+            arch: x64
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: build offline bundle
+        run: node tools/build-offline.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --dsh-version ${{ inputs.dshVersion }} --node-version ${{ inputs.nodeVersion }}
+
+      - name: smoke test (unix)
+        if: runner.os != 'Windows'
+        run: |
+          rm -rf tools/.smoke && mkdir -p tools/.smoke
+          unzip -q offline/dsh-offline-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.dshVersion }}.zip -d tools/.smoke/bundle
+          node tools/smoke.mjs tools/.smoke/bundle
+
+      - name: smoke test (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force tools/.smoke | Out-Null
+          Expand-Archive -Path offline/dsh-offline-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.dshVersion }}.zip -DestinationPath tools/.smoke/bundle -Force
+          node tools/smoke.mjs tools/.smoke/bundle
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            offline/*.zip
+            offline/*.sha256
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: generate latest.json
+        run: node tools/gen-latest.mjs --dsh-version ${{ inputs.dshVersion }} --node-version ${{ inputs.nodeVersion }} --tag ${{ inputs.tag }} --assets-dir artifacts
+
+      - name: commit latest.json back to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add latest.json
+          git diff --cached --quiet || git commit -m "chore: update latest.json for dsh@${{ inputs.dshVersion }}"
+          git push
+
+      - name: create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: dsh@${{ inputs.dshVersion }} offline bundles
+          body: |
+            离线包构建：dsh@${{ inputs.dshVersion }}，node@${{ inputs.nodeVersion }}
+            - darwin-arm64 / darwin-x64 / win32-x64
+            用 DSH Launcher 桌面应用自动下载即可。
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.sha256
+            latest.json

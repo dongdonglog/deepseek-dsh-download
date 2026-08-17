@@ -1,0 +1,17 @@
+# build outputs
+offline/*.zip
+offline/*.sha256
+tools/.staging/
+tools/.cache/
+
+# node / app deps
+app/node_modules/
+app/dist/
+node_modules/
+
+# os junk
+.DS_Store
+Thumbs.db
+
+# logs
+*.log

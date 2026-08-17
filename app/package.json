@@ -1,0 +1,58 @@
+{
+  "name": "dsh-launcher",
+  "productName": "DSH Launcher",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness (dsh) 桌面引导应用：自动下载离线包并启动 dsh web，解决 npx 安装的网络问题",
+  "main": "main.js",
+  "author": "dsh-download",
+  "license": "MIT",
+  "scripts": {
+    "prestart": "node ../tools/sync-app-config.mjs",
+    "start": "electron .",
+    "test:local": "node ../tools/test-app-local.mjs",
+    "predist": "node ../tools/sync-app-config.mjs",
+    "predist:mac": "node ../tools/sync-app-config.mjs",
+    "predist:win": "node ../tools/sync-app-config.mjs",
+    "dist": "electron-builder --mac --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
+  },
+  "dependencies": {
+    "extract-zip": "^2.0.1"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "ai.deepseek.dsh.launcher",
+    "productName": "DSH Launcher",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**",
+      "local/**",
+      "assets/**"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ]
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "zip", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

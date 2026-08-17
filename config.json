@@ -1,0 +1,8 @@
+{
+  "owner": "YOUR_GITHUB_USER",
+  "repo": "dsh-download",
+  "dshVersion": "0.1.0-rc.6",
+  "nodeVersion": "24.19.0",
+  "npmRegistry": "https://registry.npmmirror.com",
+  "mirrors": ["github", "ghproxy"]
+}
