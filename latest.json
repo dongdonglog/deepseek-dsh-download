@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "dshVersion": "0.1.0-rc.6",
+  "nodeVersion": "24.19.0",
+  "tag": "v1.0.0",
+  "platforms": {
+    "darwin-arm64": {
+      "file": "dsh-offline-darwin-arm64-0.1.0-rc.6.zip",
+      "url": "https://github.com/dongdonglog/deepseek-dsh-download/releases/download/v1.0.0/dsh-offline-darwin-arm64-0.1.0-rc.6.zip",
+      "sha256": "f3c73e7edc2accbe850128c2ca3d3da47bf2b134d35b30e50d110e2252a61edd",
+      "size": 102876178
+    },
+    "win32-x64": {
+      "file": "dsh-offline-win32-x64-0.1.0-rc.6.zip",
+      "url": "https://github.com/dongdonglog/deepseek-dsh-download/releases/download/v1.0.0/dsh-offline-win32-x64-0.1.0-rc.6.zip",
+      "sha256": "d186a9c54ed8d1b73c198c3f52f44fbe99df6785dcf526c5ae85553568e8f1be",
+      "size": 106669829
+    }
+  }
+}
