@@ -186,11 +186,11 @@ async function main() {
 		ok("[DRY-RUN] 跳过等待。");
 	} else {
 		// 找到本次 tag 触发的 run（可能出现几秒延迟），再显式 watch
-		// （非交互终端下 gh run watch 需要 run id）
+		// （非交互终端下 gh run watch 需要 run id；按 tag 过滤避免误看旧 run）
 		let runId = null;
 		for (let i = 0; i < 12 && !runId; i++) {
 			const out = sh(
-				["gh", "run", "list", "--workflow", "release.yml", "--repo", `${config.owner}/${config.repo}`, "--limit", "1", "--json", "databaseId"],
+				["gh", "run", "list", "--workflow", "release.yml", "--branch", version, "--repo", `${config.owner}/${config.repo}`, "--limit", "1", "--json", "databaseId"],
 				{ allowFail: true },
 			);
 			try {
