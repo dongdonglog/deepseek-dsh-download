@@ -185,16 +185,38 @@ async function main() {
 	if (DRY_RUN) {
 		ok("[DRY-RUN] 跳过等待。");
 	} else {
-		try {
-			sh(["gh", "run", "watch", "--repo", `${config.owner}/${config.repo}`, "--exit-status"], {
-				stdio: "inherit",
-			});
-			ok("构建发布全部成功！");
-		} catch {
-			err("构建有任务失败，请到 Actions 页面查看日志。");
-			console.log(`│   ${config.owner}/${config.repo}/actions`);
-			rl.close();
-			process.exit(1);
+		// 找到本次 tag 触发的 run（可能出现几秒延迟），再显式 watch
+		// （非交互终端下 gh run watch 需要 run id）
+		let runId = null;
+		for (let i = 0; i < 12 && !runId; i++) {
+			const out = sh(
+				["gh", "run", "list", "--workflow", "release.yml", "--repo", `${config.owner}/${config.repo}`, "--limit", "1", "--json", "databaseId"],
+				{ allowFail: true },
+			);
+			try {
+				const runs = JSON.parse(out || "[]");
+				if (runs.length) runId = runs[0].databaseId;
+			} catch {
+				/* not ready yet */
+			}
+			if (!runId) await new Promise((r) => setTimeout(r, 3000));
+		}
+		if (!runId) {
+			warn("暂时没找到对应的工作流，请到 Actions 页面查看进度。");
+			console.log(`│   https://github.com/${config.owner}/${config.repo}/actions`);
+		} else {
+			ok(`已找到工作流 run #${runId}，开始等待…`);
+			try {
+				sh(["gh", "run", "watch", String(runId), "--repo", `${config.owner}/${config.repo}`, "--exit-status"], {
+					stdio: "inherit",
+				});
+				ok("构建发布全部成功！");
+			} catch {
+				err("构建有任务失败，请到 Actions 页面查看日志。");
+				console.log(`│   https://github.com/${config.owner}/${config.repo}/actions`);
+				rl.close();
+				process.exit(1);
+			}
 		}
 	}
 

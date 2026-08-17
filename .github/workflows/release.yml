@@ -47,9 +47,8 @@ jobs:
 
       - name: read versions from config.json
         id: cfg
-        run: |
-          echo "dsh=$(node -p "require('./config.json').dshVersion")" >> "$GITHUB_OUTPUT"
-          echo "node=$(node -p "require('./config.json').nodeVersion")" >> "$GITHUB_OUTPUT"
+        # 跨 shell（bash / pwsh）写法：不用 $(...) 命令替换
+        run: node -e "const c=require('./config.json'); console.log('dsh='+c.dshVersion); console.log('node='+c.nodeVersion);" >> "$GITHUB_OUTPUT"
 
       - name: build offline bundle
         run: node tools/build-offline.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --dsh-version ${{ steps.cfg.outputs.dsh }} --node-version ${{ steps.cfg.outputs.node }}
@@ -111,6 +110,7 @@ jobs:
 
       - name: sync version from git tag
         working-directory: app
+        shell: bash
         run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --no-commit-hooks --allow-same-version
 
       - name: build mac installers
@@ -137,7 +137,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" app/dist/*.exe,app/dist/*.zip --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$GITHUB_REF_NAME" app/dist/*.exe app/dist/*.zip --clobber --repo "$GITHUB_REPOSITORY"
 
   publish:
     name: Publish release (${{ github.ref_name }})
@@ -156,9 +156,7 @@ jobs:
 
       - name: read versions from config.json
         id: cfg
-        run: |
-          echo "dsh=$(node -p "require('./config.json').dshVersion")" >> "$GITHUB_OUTPUT"
-          echo "node=$(node -p "require('./config.json').nodeVersion")" >> "$GITHUB_OUTPUT"
+        run: node -e "const c=require('./config.json'); console.log('dsh='+c.dshVersion); console.log('node='+c.nodeVersion);" >> "$GITHUB_OUTPUT"
 
       - name: generate latest.json
         run: node tools/gen-latest.mjs --dsh-version ${{ steps.cfg.outputs.dsh }} --node-version ${{ steps.cfg.outputs.node }} --tag ${{ github.ref_name }} --assets-dir artifacts
