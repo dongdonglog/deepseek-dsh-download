@@ -19,9 +19,9 @@
 
 | 平台 | 架构 | 安装包 |
 |---|---|---|
-| macOS | Apple Silicon (M1/M2/M3/M4) | `DSH Launcher-<版本>-arm64.dmg` |
-| macOS | Intel | `DSH Launcher-<版本>-x64.dmg` |
-| Windows | 64 位 | `DSH Launcher Setup <版本>.exe` |
+| macOS | Apple Silicon (M1/M2/M3/M4) | `DSH.Launcher-<版本>-arm64.dmg` |
+| macOS | Intel | `DSH.Launcher-<版本>.dmg` |
+| Windows | 64 位 | `DSH.Launcher.Setup.<版本>.exe`（另有免安装版 `DSH.Launcher-<版本>-win.zip`） |
 
 首次打开未签名应用的提示：
 
