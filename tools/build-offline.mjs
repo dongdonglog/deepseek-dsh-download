@@ -306,7 +306,7 @@ async function main() {
 	execFileSync(
 		process.platform === "win32" ? "npm.cmd" : "npm",
 		["install", "--omit=dev", "--no-audit", "--no-fund", "--prefer-offline", "--registry", registry, "--cache", npmCache],
-		{ cwd: appDir, stdio: "inherit" },
+		{ cwd: appDir, stdio: "inherit", shell: process.platform === "win32" },
 	);
 
 	/* 2. prune other-platform native variants */

@@ -15,13 +15,16 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-const [bundleDir] = process.argv.slice(2);
-if (!bundleDir) {
+const [bundleDirArg] = process.argv.slice(2);
+if (!bundleDirArg) {
 	console.error("usage: node tools/smoke.mjs <extracted-bundle-dir>");
 	process.exit(2);
 }
+// resolve to an absolute path: later checks spawn with cwd=appDir, so a
+// relative bundle path would break node resolution (ENOENT)
+const bundleDir = resolve(bundleDirArg);
 
 const nodeBin = existsSync(join(bundleDir, "node", "node"))
 	? join(bundleDir, "node", "node")
