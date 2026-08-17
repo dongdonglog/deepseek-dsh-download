@@ -148,14 +148,17 @@ await checkAsync("start(): download → verify → extract → dsh web running",
 	if (!existsSync(join(bundleDir, "manifest.json"))) throw new Error("manifest.json missing after extract");
 });
 
-await checkAsync("second start() reuses bundle without re-downloading", async () => {
+await checkAsync("restart() reuses bundle without re-downloading", async () => {
+	await runner.stop();
 	phasesSeen.length = 0;
 	const result = await runner.start();
-	if (!result) throw new Error("second start failed");
-	if (phasesSeen.includes("downloading")) throw new Error("re-downloaded on second start");
+	if (!result) throw new Error(`restart failed: ${runner.state.error}`);
+	if (runner.state.phase !== "running") throw new Error(`phase=${runner.state.phase}`);
+	if (phasesSeen.includes("downloading")) throw new Error("re-downloaded on restart");
 });
 
 await checkAsync("installLocalZip from a copied zip", async () => {
+	await runner.stop();
 	const copy = join(tmp, "copied.zip");
 	writeFileSync(copy, zipBuf);
 	const dir = await runner.installLocalZip(copy);
