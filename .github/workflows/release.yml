@@ -47,8 +47,8 @@ jobs:
 
       - name: read versions from config.json
         id: cfg
-        # 跨 shell（bash / pwsh）写法：不用 $(...) 命令替换
-        run: node -e "const c=require('./config.json'); console.log('dsh='+c.dshVersion); console.log('node='+c.nodeVersion);" >> "$GITHUB_OUTPUT"
+        # node 脚本直接写 GITHUB_OUTPUT，避免 bash/pwsh 变量语法差异
+        run: node tools/ci-versions.mjs
 
       - name: build offline bundle
         run: node tools/build-offline.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --dsh-version ${{ steps.cfg.outputs.dsh }} --node-version ${{ steps.cfg.outputs.node }}
@@ -69,6 +69,7 @@ jobs:
           node tools/smoke.mjs tools/.smoke/bundle
 
       - name: upload bundle to release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -134,7 +135,7 @@ jobs:
 
       - name: upload installers to release (win)
         if: matrix.os == 'win'
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" app/dist/*.exe app/dist/*.zip --clobber --repo "$GITHUB_REPOSITORY"
@@ -156,7 +157,7 @@ jobs:
 
       - name: read versions from config.json
         id: cfg
-        run: node -e "const c=require('./config.json'); console.log('dsh='+c.dshVersion); console.log('node='+c.nodeVersion);" >> "$GITHUB_OUTPUT"
+        run: node tools/ci-versions.mjs
 
       - name: generate latest.json
         run: node tools/gen-latest.mjs --dsh-version ${{ steps.cfg.outputs.dsh }} --node-version ${{ steps.cfg.outputs.node }} --tag ${{ github.ref_name }} --assets-dir artifacts
