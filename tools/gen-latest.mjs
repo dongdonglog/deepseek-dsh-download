@@ -64,7 +64,10 @@ if (args.base) {
 
 for (const f of files) {
 	const base = relative(args.assetsDir, f).split("\\").join("/");
-	const m = /^dsh-offline-([a-z0-9]+)-([a-z0-9]+)-([^\s/]+)\.zip$/.exec(base);
+	// artifacts may be nested under per-artifact dirs (upload-artifact layout),
+	// so match the basename, not the full relative path
+	const fileName = base.split("/").pop();
+	const m = /^dsh-offline-([a-z0-9]+)-([a-z0-9]+)-([^\s/]+)\.zip$/.exec(fileName);
 	if (!m) continue;
 	const [, platform, arch] = m;
 	const key = `${platform}-${arch}`;
@@ -79,7 +82,6 @@ for (const f of files) {
 		console.log(`[gen-latest] computed sha256 for ${base}`);
 	}
 	const size = statSync(f).size;
-	const fileName = base.split("/").pop();
 	platforms[key] = {
 		file: fileName,
 		url: `https://github.com/${config.owner}/${config.repo}/releases/download/${args.tag}/${fileName}`,
