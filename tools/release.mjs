@@ -21,7 +21,37 @@ const DRY_RUN = process.argv.includes("--dry-run");
 const config = JSON.parse(readFileSync(join(ROOT, "config.json"), "utf8"));
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
-const ask = (q) => new Promise((resolve) => rl.question(q, resolve));
+
+// 行队列式 ask：交互终端和管道输入（echo "y" | script）都能稳定工作。
+// 到达的行先入队，等有挂起的提问时再取出——避免 readline.question 在管道
+// EOF 时丢回调、以及两次提问间隙到达的输入被丢弃。
+const inputQueue = [];
+let pendingResolver = null;
+function flushQueue() {
+	while (pendingResolver && inputQueue.length) {
+		const r = pendingResolver;
+		pendingResolver = null;
+		r(inputQueue.shift());
+	}
+}
+rl.on("line", (line) => {
+	inputQueue.push(line);
+	flushQueue();
+});
+rl.on("close", () => {
+	if (pendingResolver && inputQueue.length === 0) {
+		const r = pendingResolver;
+		pendingResolver = null;
+		r(""); // EOF：当作放弃输入
+	}
+});
+function ask(question) {
+	return new Promise((resolve) => {
+		pendingResolver = resolve;
+		process.stdout.write(question);
+		flushQueue();
+	});
+}
 
 function sh(cmd, opts = {}) {
 	try {
@@ -177,6 +207,7 @@ async function main() {
 	console.log("│     2. 自己下载安装一次做验收（首次打开提示见 README）");
 	console.log("│     3. 把链接发给用户即可");
 	rl.close();
+	process.exit(0);
 }
 
 main().catch((e) => {
