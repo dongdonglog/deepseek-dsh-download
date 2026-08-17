@@ -14,14 +14,15 @@ tools/
   zipwriter.mjs               # 纯 Node zip 写入器（保留可执行位、UTF-8 文件名）
   test-app-local.mjs          # 应用纯 Node 模块的本地测试
   test-app-e2e.mjs            # 端到端测试（真实离线包：下载→校验→解压→启动→就绪）
+  release.mjs                 # 发布引导脚本（npm run release）
 app/                          # Electron 桌面应用（DSH Launcher）
   main.js                     # 主进程：窗口 / 托盘 / IPC
   preload.js                  # contextBridge 白名单
   renderer/                   # 中文单页 UI
   local/                      # 纯 Node 模块：settings / downloader / launcher / runner
 .github/workflows/
-  build-offline.yml           # 矩阵构建 3 平台离线包 → GitHub Release + latest.json
-  build-app.yml               # electron-builder 构建 mac/win 安装包 → 同一 Release
+  release.yml                # 推 tag 自动发布：离线包矩阵 + 安装包 + latest.json + 转正
+  release.mjs                # （tools/）本地发布引导脚本，npm run release
 offline/                      # 本地构建产物输出（gitignore）
 ```
 
@@ -72,14 +73,33 @@ cd app && npm run dist:win   # NSIS exe（x64）
 
 > 构建工具使用**项目内 npm 缓存**（`tools/.cache/`），不触碰全局 `~/.npm`；Node 运行时下载有 nodejs.org → npmmirror 自动回退。
 
-## 发布流程（GitHub Actions）
+## 发布流程（一键，GitHub Actions）
 
-1. `config.json` 填好 `owner` / `repo`，确认 `dshVersion` / `nodeVersion`。
-2. 仓库 Settings → Actions → General → 勾选 **Workflow permissions: Read and write**（release job 需要写 `latest.json` 和创建 Release）。
-3. 手动运行 **build-offline** workflow：填 `dshVersion`、`nodeVersion`、`tag`（如 `v1.0.0`）→ 矩阵在各平台构建离线包 → 冒烟 → 汇总生成并提交 `latest.json` → 创建 Release 上传 3 个 zip。
-4. 手动运行 **build-app** workflow：填同一个 `tag` → 构建 macOS dmg / Windows exe 追加到同一 Release。
+发布 = **推一个 `vX.Y.Z` tag**，`release.yml` 自动完成全部：
 
-**DSH 版本升级**：改 `config.json` 的 `dshVersion` 重跑 build-offline 即可，用户下次启动应用自动发现新版本（无需重装应用）。
+1. `create-release`：先建 draft Release（自动生成 release notes）
+2. `offline`（矩阵并行）：darwin-arm64 (macos-14) / darwin-x64 (macos-15-intel) / win32-x64 → 构建离线包 + 冒烟测试 → 上传 zip 到 Release
+3. `app`（矩阵并行）：macOS dmg（arm64+x64）/ Windows exe+zip → 上传到 Release
+4. `publish`：生成并提交 `latest.json` → 把 draft 转正发布
+
+### 发布方式
+
+```bash
+# 方式一：发布引导脚本（检查 → 选版本 → 打 tag → 等待 → 给地址）
+npm run release
+
+# 方式二：手动
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+前置条件（一次性）：
+
+- `config.json` 填好 `owner` / `repo`，确认 `dshVersion` / `nodeVersion`。
+- 仓库 Settings → Actions → General → 勾选 **Workflow permissions: Read and write**（publish job 需要写 `latest.json` 和建 Release）。
+- 本机装有 [gh CLI](https://cli.github.com/) 并 `gh auth login`（方式一需要）。
+
+**DSH 版本升级**：改 `config.json` 的 `dshVersion`，再发一个新 tag 即可；用户下次启动应用自动发现新离线包（无需重装应用）。
 
 ## 已知限制
 

@@ -1,0 +1,184 @@
+name: release
+
+# 懒人发布：只需 `git tag v1.0.0 && git push origin v1.0.0`
+# 自动完成：建 draft release → 构建全部离线包 + 安装包 → 生成 latest.json → 转正发布
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create draft release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --generate-notes --repo "$GITHUB_REPOSITORY"
+
+  offline:
+    name: bundle ${{ matrix.platform }}-${{ matrix.arch }}
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin
+            arch: arm64
+            runner: macos-14
+          - platform: darwin
+            arch: x64
+            runner: macos-15-intel
+          - platform: win32
+            arch: x64
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: read versions from config.json
+        id: cfg
+        run: |
+          echo "dsh=$(node -p "require('./config.json').dshVersion")" >> "$GITHUB_OUTPUT"
+          echo "node=$(node -p "require('./config.json').nodeVersion")" >> "$GITHUB_OUTPUT"
+
+      - name: build offline bundle
+        run: node tools/build-offline.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --dsh-version ${{ steps.cfg.outputs.dsh }} --node-version ${{ steps.cfg.outputs.node }}
+
+      - name: smoke test (unix)
+        if: runner.os != 'Windows'
+        run: |
+          rm -rf tools/.smoke && mkdir -p tools/.smoke
+          unzip -q offline/dsh-offline-${{ matrix.platform }}-${{ matrix.arch }}-${{ steps.cfg.outputs.dsh }}.zip -d tools/.smoke/bundle
+          node tools/smoke.mjs tools/.smoke/bundle
+
+      - name: smoke test (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force tools/.smoke | Out-Null
+          Expand-Archive -Path offline/dsh-offline-${{ matrix.platform }}-${{ matrix.arch }}-${{ steps.cfg.outputs.dsh }}.zip -DestinationPath tools/.smoke/bundle -Force
+          node tools/smoke.mjs tools/.smoke/bundle
+
+      - name: upload bundle to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" offline/*.zip offline/*.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            offline/*.zip
+            offline/*.sha256
+          if-no-files-found: error
+
+  app:
+    name: app ${{ matrix.os }}
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: mac
+            runner: macos-latest
+          - os: win
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: sync app config
+        run: node tools/sync-app-config.mjs
+
+      - name: install app deps
+        working-directory: app
+        run: npm ci
+
+      - name: sync version from git tag
+        working-directory: app
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --no-commit-hooks --allow-same-version
+
+      - name: build mac installers
+        if: matrix.os == 'mac'
+        working-directory: app
+        run: npx electron-builder --mac dmg --arm64 --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: build win installers
+        if: matrix.os == 'win'
+        working-directory: app
+        shell: pwsh
+        run: npx electron-builder --win nsis zip --x64 --publish never
+
+      - name: upload installers to release (mac)
+        if: matrix.os == 'mac'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" app/dist/*.dmg --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: upload installers to release (win)
+        if: matrix.os == 'win'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" app/dist/*.exe,app/dist/*.zip --clobber --repo "$GITHUB_REPOSITORY"
+
+  publish:
+    name: Publish release (${{ github.ref_name }})
+    needs: [offline, app]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: read versions from config.json
+        id: cfg
+        run: |
+          echo "dsh=$(node -p "require('./config.json').dshVersion")" >> "$GITHUB_OUTPUT"
+          echo "node=$(node -p "require('./config.json').nodeVersion")" >> "$GITHUB_OUTPUT"
+
+      - name: generate latest.json
+        run: node tools/gen-latest.mjs --dsh-version ${{ steps.cfg.outputs.dsh }} --node-version ${{ steps.cfg.outputs.node }} --tag ${{ github.ref_name }} --assets-dir artifacts
+
+      - name: commit latest.json back to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add latest.json
+          git diff --cached --quiet || git commit -m "chore: update latest.json for ${{ github.ref_name }}"
+          git push
+
+      - name: upload latest.json to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" latest.json --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$GITHUB_REF_NAME" --draft=false --repo "$GITHUB_REPOSITORY"

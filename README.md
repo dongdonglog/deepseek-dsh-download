@@ -40,6 +40,31 @@
 
 ---
 
+## 🚀 发布新版（维护者）
+
+**懒人流程：打一个 tag 推送，构建 + 发布全自动**（GitHub 上常见的 tag 触发式 release 模式）。
+
+### 方式一：一条命令（推荐）
+
+```bash
+npm run release
+```
+
+脚本一步步引导：检查登录/仓库/工作区 → 选版本号 → 确认内容 → 打 tag 推送 → 等待构建完成 → 给出发布地址。
+
+### 方式二：手动推 tag
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+推送后 GitHub Actions 自动完成：构建 3 个平台离线包（含冒烟测试）+ macOS dmg + Windows exe → 发布到 Releases → 更新 `latest.json`（应用自动发现新版本）。
+
+> 更新 DSH 版本：改 `config.json` 的 `dshVersion` 后再发布即可；不需要动应用代码。
+
+---
+
 ## 🚀 快速开始
 
 1. 从 [Releases](https://github.com/dongdonglog/deepseek-dsh-download/releases/latest) 下载对应平台的安装包并安装。

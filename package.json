@@ -1,0 +1,15 @@
+{
+  "name": "deepseek-dsh-download",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DeepSeek Harness 离线下载包 & 桌面引导应用（DSH Launcher）",
+  "scripts": {
+    "release": "node tools/release.mjs",
+    "release:dry": "node tools/release.mjs --dry-run",
+    "build:offline": "node tools/build-offline.mjs",
+    "test": "node tools/test-app-local.mjs",
+    "test:e2e": "node tools/test-app-e2e.mjs",
+    "smoke": "node tools/smoke.mjs"
+  },
+  "license": "MIT"
+}
