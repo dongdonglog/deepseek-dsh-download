@@ -33,7 +33,7 @@
 | 平台 | 架构 | 文件 |
 |---|---|---|
 | macOS | Apple Silicon | `dsh-offline-darwin-arm64-<dsh版本>.zip` |
-| macOS | Intel | `dsh-offline-darwin-x64-<dsh版本>.zip` |
+| macOS | Intel | `dsh-offline-darwin-x64-<dsh版本>.zip`（需先运行 build-offline-x64 workflow 追加） |
 | Windows | 64 位 | `dsh-offline-win32-x64-<dsh版本>.zip` |
 
 > 当前捆绑：`@deepseek-ai/dsh 0.1.0-rc.6` + Node.js 24 LTS，包体约 100MB。

@@ -29,9 +29,6 @@ jobs:
           - platform: darwin
             arch: arm64
             runner: macos-14
-          - platform: darwin
-            arch: x64
-            runner: macos-13
           - platform: win32
             arch: x64
             runner: windows-latest
@@ -101,7 +98,8 @@ jobs:
           name: dsh@${{ inputs.dshVersion }} offline bundles
           body: |
             离线包构建：dsh@${{ inputs.dshVersion }}，node@${{ inputs.nodeVersion }}
-            - darwin-arm64 / darwin-x64 / win32-x64
+            - darwin-arm64 / win32-x64
+            - darwin-x64（Intel Mac）请运行 build-offline-x64 workflow 后追加
             用 DSH Launcher 桌面应用自动下载即可。
           files: |
             artifacts/**/*.zip

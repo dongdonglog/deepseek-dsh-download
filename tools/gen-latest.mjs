@@ -28,6 +28,7 @@ function parseArgs(argv) {
 		else if (a === "--tag") args.tag = argv[++i];
 		else if (a === "--assets-dir") args.assetsDir = argv[++i];
 		else if (a === "--out") args.out = argv[++i];
+		else if (a === "--base") args.base = argv[++i];
 		else throw new Error(`unknown argument: ${a}`);
 	}
 	for (const k of ["dshVersion", "nodeVersion", "tag", "assetsDir"]) {
@@ -47,7 +48,19 @@ function walk(dir, out = []) {
 
 const args = parseArgs(process.argv.slice(2));
 const files = walk(args.assetsDir);
-const platforms = {};
+
+// start from an existing latest.json when given (so a later workflow run can
+// merge one more platform into the manifest without re-uploading the others)
+let platforms = {};
+if (args.base) {
+	try {
+		const base = JSON.parse(readFileSync(args.base, "utf8"));
+		platforms = { ...(base.platforms ?? {}) };
+		console.log(`[gen-latest] base: ${Object.keys(platforms).join(", ") || "(empty)"}`);
+	} catch {
+		console.log(`[gen-latest] base not found/parseable, starting fresh`);
+	}
+}
 
 for (const f of files) {
 	const base = relative(args.assetsDir, f).split("\\").join("/");
@@ -56,7 +69,15 @@ for (const f of files) {
 	const [, platform, arch] = m;
 	const key = `${platform}-${arch}`;
 	const shaFile = `${f}.sha256`;
-	const sha256 = readFileSync(shaFile, "utf8").split(/\s+/)[0];
+	let sha256;
+	try {
+		sha256 = readFileSync(shaFile, "utf8").split(/\s+/)[0];
+	} catch {
+		// sidecar missing — compute from the zip itself
+		const { createHash } = await import("node:crypto");
+		sha256 = createHash("sha256").update(readFileSync(f)).digest("hex");
+		console.log(`[gen-latest] computed sha256 for ${base}`);
+	}
 	const size = statSync(f).size;
 	const fileName = base.split("/").pop();
 	platforms[key] = {
