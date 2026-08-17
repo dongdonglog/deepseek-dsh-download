@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "owner": "YOUR_GITHUB_USER",
-  "repo": "dsh-download",
+  "owner": "dongdonglog",
+  "repo": "deepseek-dsh-download",
   "defaultMirrors": [
     {
       "id": "github",
