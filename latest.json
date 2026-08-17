@@ -15,6 +15,12 @@
       "url": "https://github.com/dongdonglog/deepseek-dsh-download/releases/download/v1.0.0/dsh-offline-win32-x64-0.1.0-rc.6.zip",
       "sha256": "d186a9c54ed8d1b73c198c3f52f44fbe99df6785dcf526c5ae85553568e8f1be",
       "size": 106669829
+    },
+    "darwin-x64": {
+      "file": "dsh-offline-darwin-x64-0.1.0-rc.6.zip",
+      "url": "https://github.com/dongdonglog/deepseek-dsh-download/releases/download/v1.0.0/dsh-offline-darwin-x64-0.1.0-rc.6.zip",
+      "sha256": "80a33753d015a00d36b9946635444b65e951a2773c1b35630dfd1b99548c49b9",
+      "size": 104567911
     }
   }
 }
